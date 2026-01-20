@@ -1,0 +1,22 @@
+# Entorno y Secretos
+.env
+*.env
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.class
+.pytest_cache/
+
+# Datos y Pesos (Ya están en volúmenes externos)
+models/
+huggingface_cache/
+postgres_data/
+
+# Logs de debug pesados
+research/experiments/*.json
+research/experiments/*.log
+.venv/
+bin/
+.env

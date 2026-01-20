@@ -1,0 +1,104 @@
+services:
+  # 1. MOTOR DE INFERENCIA
+  vllm-engine:
+    image: malkaf/vllm-blackwell-optimizer:latest
+    container_name: vllm-engine
+    runtime: nvidia
+    privileged: true
+    ipc: host
+    cpuset: ${CPU_SET}
+    ports:
+      - "8000:8000"
+    volumes:
+      - "${MODELS_PATH}:/model_dir"
+      - "${HF_CACHE_PATH}:/root/.cache/huggingface"
+      - "../../core/parsers/qwen3coder_tool_parser.py:/vllm-workspace/vllm/entrypoints/openai/tool_parsers/qwen3coder_tool_parser.py"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - VLLM_USE_V1=0
+      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=${VLLM_ALLOW_LONG_MAX_MODEL_LEN}
+      - NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL}
+      - VLLM_SKIP_P2P_CHECK=${VLLM_SKIP_P2P_CHECK}
+      - NCCL_IGNORE_CPU_AFFINITY=${NCCL_IGNORE_CPU_AFFINITY}
+      - NCCL_DMABUF_ENABLE=1
+      - NCCL_SHM_DISABLE=1
+      - VLLM_LOG_P2P_ACCESS_CHECK=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      --model /model_dir
+      --served-model-name ${SERVED_MODEL_NAME}
+      --tensor-parallel-size ${TENSOR_PARALLEL_SIZE}
+      --max-model-len ${MAX_MODEL_LEN}
+      --quantization ${QUANTIZATION}
+      --dtype auto
+      --kv-cache-dtype auto
+      --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION}
+      --enforce-eager
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --distributed-executor-backend mp
+      --disable-custom-all-reduce
+      --enable-chunked-prefill
+      --attention-backend FLASHINFER
+      --max-num-seqs 4
+      --max-num-batched-tokens 32768
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  # 2. PROXY LITELLM
+  litellm-proxy:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-proxy
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml
+    environment:
+      - LITELLM_LOG=INFO
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_HOST=http://langfuse-bunker:3000
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+    command: [ "--config", "/app/config.yaml", "--port", "4000" ]
+    depends_on:
+      vllm-engine:
+        condition: service_healthy
+
+  # 3. BASE DE DATOS
+  db-bunker:
+    image: postgres:16
+    container_name: db-bunker
+    restart: always
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 4. OBSERVABILIDAD
+  langfuse-bunker:
+    image: langfuse/langfuse:2
+    container_name: langfuse-bunker
+    depends_on:
+      - db-bunker
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - SALT=${SALT}
+      - NEXTAUTH_URL=${NEXTAUTH_URL}
+      - LANGFUSE_INIT_PROJECT_NAME=BunkerAI
+      - TELEMETRY_ENABLED=false
+
+volumes:
+  postgres_data:

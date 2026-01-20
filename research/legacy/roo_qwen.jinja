@@ -1,0 +1,22 @@
+{%- if messages[0]['role'] == 'system' -%}
+<|im_start|>system
+{{ messages[0]['content'] }}
+# ROO CODE PROTOCOL:
+- You must reason in <thinking>...</thinking> tags.
+- You must use the "tool_call" JSON format for actions.
+<|im_end|>
+{%- endif -%}
+{%- for message in messages[1:] -%}
+<|im_start|>{{ message.role }}
+{%- if message.content -%}{{ message.content }}{%- endif -%}
+{%- if message.tool_calls -%}
+{%- for tool in message.tool_calls -%}
+{"tool_call": {"name": "{{ tool.function.name }}", "arguments": {{ tool.function.arguments }}}}
+{%- endfor -%}
+{%- endif -%}
+<|im_end|>
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+<|im_start|>assistant
+<thinking>
+{%- endif -%}
