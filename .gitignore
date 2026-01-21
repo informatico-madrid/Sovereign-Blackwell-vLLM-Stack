@@ -3,6 +3,7 @@
 *.env
 .vscode/
 
+
 # Python
 __pycache__/
 *.py[cod]
@@ -13,6 +14,7 @@ __pycache__/
 models/
 huggingface_cache/
 postgres_data/
+deploy/compose/litellm-config.yaml
 
 # Logs de debug pesados
 research/experiments/*.json

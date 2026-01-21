@@ -1,7 +1,7 @@
 model_list:
-  - model_name: qwen3-30b-fp8
+  - model_name: ${SERVED_MODEL_NAME}
     litellm_params:
-      model: openai/qwen3-30b-fp8
+      model: openai/${SERVED_MODEL_NAME}
       api_base: http://vllm-engine:8000/v1
       api_key: sk-1234 # Key interna LiteLLM y vLLM
       drop_params: True

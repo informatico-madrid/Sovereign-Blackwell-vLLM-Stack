@@ -1,0 +1,348 @@
+diff --git a/.env.example b/.env.example
+index d7fbacb..d1a7a7e 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,66 +1,36 @@
+ # ==============================================================================
+-# SOVEREIGN AI STACK - PRODUCTION CONFIGURATION (NATIVE 256K CONTEXT)
+-# Optimized for: Dual RTX 5090 (Blackwell) + AMD Threadripper
++# SOVEREIGN AI STACK - GLOBAL INFRASTRUCTURE (BLACKWELL OPTIMIZED)
+ # ==============================================================================
+ 
+-# === HOST INFRASTRUCTURE PATHS ===
+-# Base directory where all your local models are stored
++# === HOST PATHS (Soberanía de Datos) ===
++# Directorio raíz en NVMe Gen 5 para todos los modelos
+ MODELS_ROOT=/mnt/bunker_data/ai/models
+-# Specific path to the model directory (e.g., Qwen3-Coder-30B-Instruct-FP8)
+-MODELS_PATH=${MODELS_ROOT}/qwen3-coder-30b-fp8
+-# Persistent cache for HuggingFace metadata and shards
++# Cache persistente para evitar redundancia en descargas
+ HF_CACHE_PATH=/mnt/bunker_data/ai/hf_cache
+-# Your HuggingFace Token (Required for gated models)
++# Token de HuggingFace (Requerido para modelos gated y cuotas de API)
+ HF_TOKEN=your_hf_token_here
+ 
+-# === INFERENCE ENGINE (vLLM) ===
+-# Name exposed via the OpenAI-compatible API
+-SERVED_MODEL_NAME=qwen3-coder-30b-fp8
+-# Number of GPUs to shard the model (TP=2 for Dual GPU setup)
+-TENSOR_PARALLEL_SIZE=2
+-# Native context window. 262144 is the native limit for Qwen3-Coder. 
+-# Avoid values >262144 without YaRN scaling to prevent numerical instability.
+-MAX_MODEL_LEN=262144
+-# VRAM reservation fraction (0.84). 
+-# Provides a balanced headroom for activation tensors on Blackwell architecture.
+-GPU_MEMORY_UTILIZATION=0.84
+-# Weight precision. 'fp8' is highly optimized for H100/RTX 50-series Tensor Cores.
+-QUANTIZATION=fp8
+-# CPU core pinning (e.g., mapping to a specific Threadripper CCD)
+-# Prevents context switching and reduces latency.
+-CPU_SET=1-5,25-29
+-
+-# === LOW-LEVEL OPTIMIZATIONS (Blackwell & NCCL) ===
+-# Enable vLLM V1 high-performance engine for Blackwell-specific kernels
+-VLLM_USE_V1=1
+-# Set to 0 for strict stability. Prevents model from exceeding native context limit.
+-VLLM_ALLOW_LONG_MAX_MODEL_LEN=0
+-# Peer-to-Peer communication level (PCI/NVL). Forces PCIe path for dual 5090.
++# === HARDWARE & KERNEL LOW-LEVEL (Blackwell sm_120) ===
++# Fuerza el uso de kernels nativos Blackwell (RTX 50-series)
++VLLM_GPU_ARCH=12.0
++# Habilita DMA-BUF para comunicación nativa en Kernel 6.14 (Sustituye nvidia_peermem)
++NCCL_DMABUF_ENABLE=1
++# Peer-to-Peer a nivel de bus PCI para evitar cuellos de botella en Dual 5090
+ NCCL_P2P_LEVEL=PCI
+-# Bypasses P2P accessibility checks to speed up engine initialization
++# Bypass de chequeos P2P para acelerar el arranque del motor
+ VLLM_SKIP_P2P_CHECK=1
+-# Prevents NCCL from overriding Docker's CPU affinity settings (CPU_SET)
++# Evita que NCCL ignore el aislamiento de CPUs definido en el orquestador
+ NCCL_IGNORE_CPU_AFFINITY=1
++# Deshabilita Shared Memory de NCCL para forzar el uso de memoria de GPU rápida
++NCCL_SHM_DISABLE=1
+ 
+-# === DATABASE (PostgreSQL) ===
+-# Credentials for the internal database container
+-DB_USER=admin
+-DB_PASSWORD=secure_admin_password
+-DB_NAME=langfuse
+-# Internal connection string for Langfuse to DB communication
+-DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db-bunker:5432/${DB_NAME}
+-
+-# === OBSERVABILITY (Langfuse) ===
+-# Security salt for encryption (Generate with: openssl rand -base64 32)
++# === OBSERVABILITY & SECURITY (Langfuse + Proxy) ===
++# Salt de seguridad (Generar con: openssl rand -base64 32)
+ SALT=replace_with_32_character_random_string
+-LANGFUSE_PUBLIC_KEY=pk-lf-your-public-key
+-LANGFUSE_SECRET_KEY=sk-lf-your-secret-key
+-# Endpoint where Langfuse UI is exposed (Local IP or DNS)
+-LANGFUSE_HOST=http://192.168.1.XXX:3000
+-# Authentication secret and public URL for the observability dashboard
++LANGFUSE_PUBLIC_KEY=pk-lf-your-key
++LANGFUSE_SECRET_KEY=sk-lf-your-key
++LITELLM_MASTER_KEY=sk-bunker-2026
++# URL interna para comunicación entre contenedores
++DATABASE_URL=postgresql://admin:password@db-bunker:5432/langfuse
+ NEXTAUTH_SECRET=your_auth_secret_here
+-NEXTAUTH_URL=http://192.168.1.XXX:3000
+-
+-# === PROXY GATEWAY (LiteLLM) ===
+-# Master API key to access the unified endpoint
+-LITELLM_MASTER_KEY=sk-master-2026
+\ No newline at end of file
++NEXTAUTH_URL=http://localhost:3000
+\ No newline at end of file
+diff --git a/.gitignore b/.gitignore
+index 5d794ce..f53095d 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -3,6 +3,7 @@
+ *.env
+ .vscode/
+ 
++
+ # Python
+ __pycache__/
+ *.py[cod]
+@@ -13,6 +14,7 @@ __pycache__/
+ models/
+ huggingface_cache/
+ postgres_data/
++deploy/compose/litellm-config.yaml
+ 
+ # Logs de debug pesados
+ research/experiments/*.json
+diff --git a/README.md b/README.md
+index d73651d..e0ce68d 100644
+--- a/README.md
++++ b/README.md
+@@ -131,6 +131,30 @@ If you need to modify the tool-calling logic or support a different protocol:
+ 
+ ---
+ 
++## 📦 Operativa de Perfiles
++La infraestructura ahora utiliza una abordaje declarativo impulsado por perfiles. Cada perfil define completamente la receta de lanzamiento para un modelo específico.
++
++Para añadir un nuevo modelo:
++1. Cree un nuevo archivo `.env` en `deploy/profiles/` con la siguiente estructura:
++   ```
++   SERVED_MODEL_NAME=nombre-del-modelo
++   MODEL_PATH=/ruta/al/modelo
++   VLLM_LAUNCH_COMMAND=--model /model_dir --gpu-memory-utilization 0.86 --max-model-len 262144 --tensor-parallel-size 2 --use-v1 1 --tool-call-parser nombre_parser
++   CPU_SET=0-7
++   ```
++
++2. Utilice el perfil al iniciar:
++   ```bash
++   ./start.sh start nombre-del-perfil
++   ```
++
++Perfiles disponibles:
++- `qwen3-30b-fp8` - Qwen3-Coder 30B FP8
++- `deepseek-r1-32b-awq` - DeepSeek-R1 32B AWQ
++- `llama-3.3-70b-instruct-awq` - Llama-3.3 70B Instruct AWQ
++
++---
++
+ ## ⚖️ Credits & Open Source Compliance
+ - **Inference Engine:** [vLLM Project](https://github.com/vllm-project/vllm) (Apache 2.0).
+ - **Tool Parsing:** Derived from community efforts in the vLLM ecosystem.
+diff --git a/deploy/compose/docker-compose.yml b/deploy/compose/docker-compose.yml
+index 37aeda4..32a6e41 100644
+--- a/deploy/compose/docker-compose.yml
++++ b/deploy/compose/docker-compose.yml
+@@ -10,19 +10,21 @@ services:
+     ports:
+       - "8000:8000"
+     volumes:
+-      - "${MODELS_PATH}:/model_dir"
++      - "${MODEL_PATH}:/model_dir"
+       - "${HF_CACHE_PATH}:/root/.cache/huggingface"
+     environment:
+-      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+-      - VLLM_USE_V1=1
++      - HUGGING_FACE_HUB_TOKEN
++      - VLLM_USE_V1
+       - VLLM_NO_USAGE_STATS=1
+-      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=${VLLM_ALLOW_LONG_MAX_MODEL_LEN}
+-      - NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL}
+-      - VLLM_SKIP_P2P_CHECK=${VLLM_SKIP_P2P_CHECK}
+-      - NCCL_IGNORE_CPU_AFFINITY=${NCCL_IGNORE_CPU_AFFINITY}
+-      - NCCL_DMABUF_ENABLE=1
++      - VLLM_ALLOW_LONG_MAX_MODEL_LEN
++      - NCCL_P2P_LEVEL
++      - VLLM_SKIP_P2P_CHECK
++      - NCCL_IGNORE_CPU_AFFINITY
++      - NCCL_DMABUF_ENABLE
+       - NCCL_SHM_DISABLE=1
+       - VLLM_LOG_P2P_ACCESS_CHECK=0
++      - VLLM_GPU_ARCH=12.0
++      - PYTHONPATH=/vllm-workspace
+     deploy:
+       resources:
+         reservations:
+@@ -30,23 +32,7 @@ services:
+             - driver: nvidia
+               count: all
+               capabilities: [gpu]
+-    command: >
+-      --model /model_dir
+-      --served-model-name ${SERVED_MODEL_NAME}
+-      --tensor-parallel-size ${TENSOR_PARALLEL_SIZE}
+-      --max-model-len ${MAX_MODEL_LEN}
+-      --quantization ${QUANTIZATION}
+-      --dtype auto
+-      --kv-cache-dtype auto
+-      --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION}
+-      --enforce-eager
+-      --distributed-executor-backend mp
+-      --disable-custom-all-reduce
+-      --enable-chunked-prefill
+-      --attention-backend FLASHINFER
+-      --max-num-seqs 1
+-      --enable-auto-tool-choice
+-      --tool-call-parser qwen3_coder
++    command: ${VLLM_LAUNCH_COMMAND}
+    
+   # 2. PROXY LITELLM
+   litellm-proxy:
+diff --git a/deploy/compose/litellm-config.yaml b/deploy/compose/litellm-config.yaml
+index 061fdfb..d6cd87a 100644
+--- a/deploy/compose/litellm-config.yaml
++++ b/deploy/compose/litellm-config.yaml
+@@ -1,7 +1,7 @@
+ model_list:
+-  - model_name: bunker-agent
++  - model_name: qwen3-30b-fp8
+     litellm_params:
+-      model: openai/qwen3-coder-30b-fp8
++      model: openai/qwen3-30b-fp8
+       api_base: http://vllm-engine:8000/v1
+       api_key: sk-1234 # Key interna LiteLLM y vLLM
+       drop_params: True
+@@ -20,4 +20,4 @@ model_list:
+ litellm_settings:
+   drop_params: True
+   success_callback: ["langfuse"]
+-  failure_callback: ["langfuse"]
++  failure_callback: ["langfuse"]
+\ No newline at end of file
+diff --git a/start.sh b/start.sh
+index c3eb678..d4668d3 100755
+--- a/start.sh
++++ b/start.sh
+@@ -4,6 +4,7 @@
+ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ COMPOSE_FILE="$SCRIPT_DIR/deploy/compose/docker-compose.yml"
+ ENV_FILE="$SCRIPT_DIR/.env"
++TEMPLATE_CONFIG="$SCRIPT_DIR/deploy/compose/litellm-config-template.yaml"
+ 
+ # --- SAFETY CHECK ---
+ if [ ! -f "$ENV_FILE" ]; then
+@@ -12,34 +13,92 @@ if [ ! -f "$ENV_FILE" ]; then
+     exit 1
+ fi
+ 
++# Función para limpiar VRAM antes de iniciar
++cleanup_vram() {
++    echo "🧹 Limpiando VRAM y memoria compartida NCCL..."
++    # Matar procesos relacionados con vLLM y NCCL
++    pkill -f "vllm" 2>/dev/null || true
++    pkill -f "python.*vllm" 2>/dev/null || true
++    # Eliminar archivos de memoria compartida NCCL
++    rm -rf /tmp/.nccl* 2>/dev/null || true
++    # Esperar un momento para asegurar la limpieza
++    sleep 1
++}
++
++# Función para generar config de LiteLLM dinámico
++generate_litellm_config() {
++    if [ ! -f "$TEMPLATE_CONFIG" ]; then
++        echo "❌ Error: Plantilla de LiteLLM no encontrada en $TEMPLATE_CONFIG"
++        exit 1
++    fi
++    
++    # Generar archivo de configuración dinámico basado en SERVED_MODEL_NAME
++    sed "s/\${SERVED_MODEL_NAME}/$SERVED_MODEL_NAME/g" "$TEMPLATE_CONFIG" > "$SCRIPT_DIR/deploy/compose/litellm-config.yaml"
++}
++
+ case "$1" in
+   start)
+-    echo "🚀 Starting Sovereign AI Stack..."
+-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
++    echo "🚀 Iniciando Sovereign AI Stack..."
++    
++    # Verificar si se especificó un perfil
++    if [ -n "$2" ] && [ "$2" != "default" ]; then
++        PROFILE_PATH="$SCRIPT_DIR/deploy/profiles/$2.env"
++        if [ -f "$PROFILE_PATH" ]; then
++            echo "⚙️  Cargando perfil: $2"
++            set -a
++            # Primero el global
++            source "$ENV_FILE"
++            # Luego el perfil (sobrescribe lo anterior)
++            source "$PROFILE_PATH"
++            set +a
++        else
++            echo "❌ Error: Perfil $2 no encontrado."
++            exit 1
++        fi
++    else
++        # Cargar solo el .env global
++        set -a
++        source "$ENV_FILE"
++        set +a
++    fi
++    
++    # Limpiar VRAM antes de iniciar
++    cleanup_vram
++    
++    # Generar configuración de LiteLLM dinámica
++    generate_litellm_config
++    
++    # Iniciar servicios
++    docker compose -f "$COMPOSE_FILE" up
+     ;;
+   stop)
+-    echo "🛑 Stopping Sovereign AI Stack..."
+-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down
++    echo "🛑 Deteniendo Sovereign AI Stack..."
++    docker compose -f "$COMPOSE_FILE" down
+     ;;
+   restart)
+-    echo "🔄 Restarting Sovereign AI Stack..."
+-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down
++    echo "🔄 Reiniciando Sovereign AI Stack..."
++    docker compose -f "$COMPOSE_FILE" down
+     # Esperar un momento para liberar VRAM
+     sleep 2
+-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
++    # Limpiar VRAM antes de reiniciar
++    cleanup_vram
++    # Generar configuración de LiteLLM dinámica
++    generate_litellm_config
++    docker compose -f "$COMPOSE_FILE" up
+     ;;
+   logs)
+-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs -f "${2:-}"
++    docker compose -f "$COMPOSE_FILE" logs -f "${2:-}"
+     ;;
+   status)
+-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
++    docker compose -f "$COMPOSE_FILE" ps
+     ;;
+   check)
+-    echo "🔍 Checking vLLM Health Status..."
++    echo "🔍 Verificando estado de salud de vLLM..."
+     curl -s http://localhost:8000/health
+     ;;
+   *)
+-    echo "Usage: $0 {start|stop|restart|logs [service]|status|check}"
++    echo "Uso: $0 {start|stop|restart|logs [service]|status|check}"
++    echo "Para usar un perfil específico: $0 start <nombre_perfil>"
+     exit 1
+     ;;
+ esac
+\ No newline at end of file
