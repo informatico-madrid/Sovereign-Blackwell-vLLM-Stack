@@ -5,11 +5,11 @@ A high-performance, on-premise inference stack optimized for **NVIDIA Blackwell 
 ---
 
 ## 📊 Performance Benchmarks (Dual RTX 5090 / sm_120)
-* **Model:** Qwen3-Coder-30B-A3B (MoE)
+* **Model:** Qwen3-Coder-30B-A3B (MoE) - FP8 Precision
 * **Ingestion Speed (Prefill):** 5,809 tokens/s 🚀
 * **Verified TTFT (250K context):** 43.03s (Time To First Token) 🏆
 * **Generation Throughput:** 43.75 tokens/s
-* **Context Capacity:** 262,144 tokens (Hardware Limit Validated)
+* **Context Capacity:** 262,144 tokens (Native Limit Validated)
 
 ---
 
@@ -29,25 +29,62 @@ In the era of massive legacy codebases, the "Privacy Gap" prevents enterprises f
 
 ---
 
-## 🚀 Quick Start (One-Click Deploy)
+## 🚀 Quick Start
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/your-user/sovereign-ai-stack.git](https://github.com/your-user/sovereign-ai-stack.git)
+    git clone https://github.com/informatico-madrid/Sovereign-Blackwell-vLLM-Stack
     cd sovereign-ai-stack
     ```
 
 2.  **Configure Environment:**
     ```bash
     cp .env.example .env
-    # Edit .env with your HF_TOKEN and paths
-    nano .env 
+    nano .env  # Edit with your setup
     ```
+    
+    Key variables to configure:
+    - `PROJECT_ROOT` - Absolute path to this repository
+    - `MODELS_ROOT` - Path to your models directory
 
 3.  **Launch the Stack:**
     ```bash
-    docker compose -f deploy/compose/docker-compose.yml up -d
+    ./start.sh start
     ```
+
+---
+
+## 📦 Project Structure
+
+```
+sovereign-ai-stack/
+├── .env                    # Environment configuration (not versioned)
+├── .env.example            # Template for .env
+├── start.sh                # Service management script
+├── core/
+│   ├── parsers/            # Tool call parsers for vLLM
+│   │   └── qwen3coder_tool_parser.py
+│   └── templates/          # Chat templates
+└── deploy/
+    └── compose/
+        ├── docker-compose.yml
+        └── litellm-config.yaml
+```
+
+---
+
+## 🔧 Service Management
+
+Use the included `start.sh` script for all operations:
+
+```bash
+./start.sh start     # Start all services
+./start.sh stop      # Stop all services
+./start.sh restart   # Restart all services
+./start.sh status    # Show container status
+./start.sh logs      # Tail all logs
+./start.sh logs vllm-engine  # Tail specific service logs
+```
 
 ---
 
@@ -60,9 +97,11 @@ This stack is optimized for **Tool Calling**. Configure your agent as follows:
 - **Model ID:** `bunker-agent`
 - **Custom Instructions:** Ensure your agent is aware of the 256K context limit.
 
-### Why the Custom Parser?
-Qwen 3 MoE uses a specific XML protocol for tool invocation. This stack includes a **Bespoke Tool Parser** (`core/parsers/qwen3coder_tool_parser.py`) that translates these XML calls into standard JSON for Roo Code, resolving the "Handshake Gap" common in standard vLLM deployments.
+### Native Tool Parsing
+This stack is specifically engineered to bridge the "Handshake Gap" between Qwen3's internal XML protocol and standard JSON agents. 
 
+- **Internal Logic:** The optimized image includes a native `qwen3_coder` parser that handles the translation automatically.
+- **Extensibility:** While the stack uses the internal parser by default, developers can inject custom logic by mapping a local parser to the container's internal path (see `Advanced Customization`).
 ---
 
 ## 🔍 Monitoring & Observability
@@ -76,7 +115,19 @@ Access **Langfuse** at `http://localhost:3000` to:
 ## ⚙️ Low-Level Optimizations
 - **NCCL Tuning:** Forced `NCCL_DMABUF_ENABLE=1` to leverage Blackwell's native memory subsystem.
 - **FlashInfer Backend:** Bypassing `flash-attn` symbol conflicts on SM_120 for stable inference.
-- **KV Cache Optimization:** Tuned to 0.90 utilization to maximize context without OOM.
+- **KV Cache Optimization:** Tuned to 0.84 utilization to maximize context without OOM.
+
+---
+
+## 🛠️ Advanced: Custom Tool Parsers
+If you need to modify the tool-calling logic or support a different protocol:
+1. Place your parser in `core/parsers/my_custom_parser.py`.
+2. Add the volume mount to `deploy/compose/docker-compose.yml`:
+   ```yaml
+   volumes:
+     - ./core/parsers/my_custom_parser.py:/vllm-workspace/vllm/model_executor/layers/fused_moe/custom_parser.py
+   ```
+3. Update the --tool-call-parser flag in the command section.
 
 ---
 

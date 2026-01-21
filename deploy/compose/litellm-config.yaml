@@ -1,17 +1,21 @@
 model_list:
   - model_name: bunker-agent
     litellm_params:
-      model: openai/qwen3-coder-30b-awq
+      model: openai/qwen3-coder-30b-fp8
       api_base: http://vllm-engine:8000/v1
-      api_key: sk-1234 # Key interna entre LiteLLM y vLLM
+      api_key: sk-1234 # Key interna LiteLLM y vLLM
       drop_params: True
       enable_tool_calling: True
       stream: true
-      # Parámetros recomendados para Qwen3-Coder
+      # recomended params for Qwen3-Coder
       temperature: 0.7
       top_p: 0.8
       top_k: 20
       repetition_penalty: 1.05
+    model_info:
+      # Tool calling metadata
+      supports_function_calling: true
+      supports_parallel_function_calling: true
 
 litellm_settings:
   drop_params: True
